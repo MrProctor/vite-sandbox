@@ -1,4 +1,4 @@
-import './App.css'
+import './styles/normalize.css';
 import {MainPage} from './pages/main-page';
 import {BrowserRouter, Route, Routes} from 'react-router-dom';
 import NotFoundPage from './pages/not-found-page';
