@@ -7,6 +7,7 @@ import {SubMainPage} from '@/pages/sub-main-page';
 function App() {
     return <BrowserRouter>
         <Routes>
+            <Route path='/' element={<MainPage />} />
             <Route path='vite-sandbox/' element={<MainPage />} />
             <Route path='vite-sandbox/sub' element={<SubMainPage />} />
             <Route path="*" element={<NotFoundPage />} />
