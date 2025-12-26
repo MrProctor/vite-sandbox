@@ -10,7 +10,7 @@ module.exports = {
     "prettier",
     "plugin:import/typescript"
   ],
-  ignorePatterns: ['dist', '.eslintrc.cjs', 'vite.config.ts'],
+  ignorePatterns: ['dist', '.eslintrc.cjs', 'vite.config.ts', 'postcss.config.js', 'tailwind.config.js'],
   parser: '@typescript-eslint/parser',
   parserOptions: {
     "ecmaFeatures": {

@@ -5,6 +5,38 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite + React + TS</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css?family=Roboto');
+      @media print {
+        .new-page {
+          page-break-before: always;
+        }
+        @page {size: landscape}
+      }
+      body { font-family: Roboto; margin: 0; text-align: center; }
+      .invisible { visibility: hidden; }
+      .header { margin: 10px 10px 0 10px; }
+      .header:not(:first-child) { page-break-before: always; }
+      .header .top { font-size: 16px; margin: 5px 30px; border-bottom: 1px solid #BDBDBD; text-align: left; padding-bottom: 2px; }
+      .header .top span { font-weight: bold; } .header .top span:not(:first-child) { margin-left: 10px; }
+      .graphContainer {display: -webkit-box; -webkit-box-pack: center}
+      .header .graphHeader { display: -webkit-box; -webkit-box-pack: justify; }
+      .header .graphHeader .total-possible { margin: 0 0 5px 130px; display: -webkit-box; -webkit-flex-direction: column; -webkit-box-pack: end; }
+      .header .graphHeader .total-possible > div:nth-child(1) { font-size: 14px; text-decoration: underline; }
+      .header .graphHeader .total-possible > div:nth-child(2) { font-weight: bold; }
+      .student { font-size: 26px; font-weight: bold; margin: 10px 0 3px; }
+      .test-name { font-size: 20px; font-weight: bold; }
+      .range { font-size: 16px; margin: 5px 0; }
+      .tables { display: -webkit-box; -webkit-box-pack: center; }
+      .tables table { margin: 0 10px; border-collapse: collapse; border: 1px solid black; font-size: 16px; height: 100%; }
+      table tr > *:first-child { border-right-width: 2px; }
+      table tr td:last-child { font-weight: bold; }
+      table tr:nth-child(2) td { border-top-width: 2px; }
+      table th, table td { border: 1px solid #BDBDBD; font-weight: normal; text-align: center; }
+      table th { padding: 2px 8px; }
+      table td { font-size: 14px; padding: 5px 8px; }
+      table th > div, table td > div { display: -webkit-box; width: 280px; -webkit-box-pack: justify; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
