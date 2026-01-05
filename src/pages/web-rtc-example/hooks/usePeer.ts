@@ -1,124 +1,205 @@
-import { useEffect, useRef, useState } from 'react';
-import Peer, { DataConnection } from 'peerjs';
+import { useEffect, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { setMyPeerId, addConnection, removeConnection, setError, setConnectionStatus, addMessage } from '../store/peerSlice';
+import * as signalR from '@microsoft/signalr';
 import { RootState } from '../store';
+import { setMyPeerId, addConnection, removeConnection, setError, setConnectionStatus, addMessage } from '../store/peerSlice';
+
+const SIGNALING_URL = 'https://signaling-server-2032.azurewebsites.net/signal';
+
+const RTC_CONFIG: RTCConfiguration = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+};
 
 export const usePeer = () => {
     const dispatch = useDispatch();
-    const peerRef = useRef<Peer | null>(null);
-    const [peerInstance, setPeerInstance] = useState<Peer | null>(null);
     const { myPeerId } = useSelector((state: RootState) => state.peer);
 
-    const handleConnection = (conn: DataConnection) => {
-        conn.on('open', () => {
-            console.log('Connection opened with:', conn.peer);
-            dispatch(addConnection(conn.peer));
-            dispatch(setConnectionStatus('CONNECTED'));
-        });
+    // Store SignalR connection
+    const hubConnectionRef = useRef<signalR.HubConnection | null>(null);
 
-        conn.on('data', (data: any) => {
-            console.log('Received data:', data);
-            if (data && data.type === 'MESSAGE') {
-                dispatch(addMessage({
-                    id: crypto.randomUUID(),
-                    senderId: conn.peer,
-                    role: 'OTHER',
-                    content: data.content,
-                    timestamp: Date.now()
-                }));
+    // Store RTCPeerConnections: peerId -> RTCPeerConnection
+    const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+
+    // Store DataChannels: peerId -> RTCDataChannel
+    const dataChannelsRef = useRef<Map<string, RTCDataChannel>>(new Map());
+
+    // Helper to create or get RTCPeerConnection
+    const getOrCreateConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
+        if (peerConnectionsRef.current.has(remotePeerId)) {
+            return peerConnectionsRef.current.get(remotePeerId)!;
+        }
+
+        console.log(`Creating RTCPeerConnection for ${remotePeerId}`);
+        const pc = new RTCPeerConnection(RTC_CONFIG);
+        peerConnectionsRef.current.set(remotePeerId, pc);
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate && hubConnectionRef.current) {
+                console.log('Sending ICE candidate');
+                hubConnectionRef.current.invoke('SendIce', remotePeerId, JSON.stringify(event.candidate))
+                    .catch(err => console.error('Error sending ICE:', err));
             }
-        });
-
-        conn.on('close', () => {
-            console.log('Connection closed with:', conn.peer);
-            dispatch(removeConnection(conn.peer));
-        });
-
-        conn.on('error', (err) => {
-            console.error('Connection error:', err);
-            dispatch(setError(err.message));
-        });
-    };
-
-    useEffect(() => {
-        // Only initialize if we haven't already
-        if (peerRef.current) return;
-
-        const peer = new Peer({
-            host: 'signaling-server-6127.azurewebsites.net',
-            port: 443,
-            secure: true,
-            config: {
-                iceServers: [
-                    {
-                        urls: [
-                            'stun:stun1.l.google.com:19302',
-                            'stun:stun2.l.google.com:19302',
-                        ],
-                    },
-                ],
-            },
-        });
-        peerRef.current = peer;
-        setPeerInstance(peer);
-
-        peer.on('open', (id) => {
-            console.log('My peer ID is: ' + id);
-            dispatch(setMyPeerId(id));
-            dispatch(setError(null));
-        });
-
-        peer.on('connection', (conn) => {
-            console.log('Incoming connection:', conn.peer);
-            // Handle incoming connection
-            handleConnection(conn);
-        });
-
-        peer.on('error', (err) => {
-            console.error('Peer error:', err);
-            dispatch(setError(err.message));
-            dispatch(setConnectionStatus('ERROR'));
-        });
-
-        return () => {
-            // Cleanup is tricky with PeerJS in React strict mode / hot reload
-            // We often want to keep the peer alive or handle destruction carefully
-            // For this demo, we might not destroy it immediately on every re-render to avoid ID thrashing
-            // peer.destroy();
         };
+
+        pc.onconnectionstatechange = () => {
+            console.log(`Connection state with ${remotePeerId}: ${pc.connectionState}`);
+            if (pc.connectionState === 'connected') {
+                dispatch(addConnection(remotePeerId));
+                dispatch(setConnectionStatus('CONNECTED'));
+            } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+                dispatch(removeConnection(remotePeerId));
+                peerConnectionsRef.current.delete(remotePeerId);
+                dataChannelsRef.current.delete(remotePeerId);
+            } else if (pc.connectionState === 'failed') {
+                dispatch(setConnectionStatus('ERROR'));
+                dispatch(setError(`Connection failed with ${remotePeerId}`));
+            }
+        };
+
+        if (isInitiator) {
+            // Create Data Channel if we are the initiator
+            const dc = pc.createDataChannel("chat");
+            setupDataChannel(remotePeerId, dc);
+        } else {
+            // Listen for Data Channel if we are the receiver
+            pc.ondatachannel = (event) => {
+                setupDataChannel(remotePeerId, event.channel);
+            };
+        }
+
+        return pc;
     }, [dispatch]);
 
-    const connectToHost = (hostId: string) => {
-        if (!peerInstance || !hostId) return;
+    const setupDataChannel = (remotePeerId: string, dc: RTCDataChannel) => {
+        dc.onopen = () => {
+            console.log(`DataChannel open with ${remotePeerId}`);
+            dataChannelsRef.current.set(remotePeerId, dc);
+        };
+
+        dc.onmessage = (event) => {
+            console.log('Received message:', event.data);
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'MESSAGE') {
+                    dispatch(addMessage({
+                        id: crypto.randomUUID(),
+                        senderId: remotePeerId,
+                        role: 'OTHER',
+                        content: data.content,
+                        timestamp: Date.now()
+                    }));
+                }
+            } catch (e) {
+                console.error('Failed to parse message:', e);
+            }
+        };
+
+        dc.onclose = () => {
+            console.log(`DataChannel closed with ${remotePeerId}`);
+            dataChannelsRef.current.delete(remotePeerId);
+        };
+    };
+
+    // Initialize SignalR
+    useEffect(() => {
+        if (hubConnectionRef.current) return;
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl(SIGNALING_URL)
+            .withAutomaticReconnect()
+            .build();
+
+        connection.start()
+            .then(() => {
+                console.log('SignalR Connected');
+                console.log('My Connection ID:', connection.connectionId);
+                if (connection.connectionId) {
+                    dispatch(setMyPeerId(connection.connectionId));
+                    dispatch(setError(null));
+                }
+            })
+            .catch(err => {
+                console.error('SignalR Connection Error: ', err);
+                dispatch(setError(`SignalR Error: ${err.message}`));
+                dispatch(setConnectionStatus('ERROR'));
+            });
+
+        // Handle incoming Offer
+        connection.on('ReceiveOffer', async (senderId: string, offerJson: string) => {
+            console.log('Received Offer from:', senderId);
+            const offer = JSON.parse(offerJson);
+            const pc = getOrCreateConnection(senderId, false);
+
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            await connection.invoke('SendAnswer', senderId, JSON.stringify(answer));
+        });
+
+        // Handle incoming Answer
+        connection.on('ReceiveAnswer', async (senderId: string, answerJson: string) => {
+            console.log('Received Answer from:', senderId);
+            const answer = JSON.parse(answerJson);
+            const pc = getOrCreateConnection(senderId, true); // We must have been the initiator
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        // Handle incoming ICE
+        connection.on('ReceiveIce', async (senderId: string, candidateJson: string) => {
+            console.log('Received ICE from:', senderId);
+            const candidate = JSON.parse(candidateJson);
+            const pc = getOrCreateConnection(senderId, false); // Doesn't matter if initiator or not here
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        hubConnectionRef.current = connection;
+
+        return () => {
+            connection.stop();
+        };
+    }, [dispatch, getOrCreateConnection]);
+
+    const connectToHost = async (hostId: string) => {
+        if (!hubConnectionRef.current || !hostId) return;
 
         dispatch(setConnectionStatus('CONNECTING'));
-        const conn = peerInstance.connect(hostId);
-        handleConnection(conn);
+        console.log('Connecting to host:', hostId);
+
+        const pc = getOrCreateConnection(hostId, true);
+
+        try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            await hubConnectionRef.current.invoke('SendOffer', hostId, JSON.stringify(offer));
+        } catch (err: any) {
+            console.error('Error creating offer:', err);
+            dispatch(setError(err.message));
+        }
     };
 
     const sendMessage = (content: string) => {
-        if (!peerInstance || !content.trim()) return;
+        if (!content.trim()) return;
 
         const messagePayload = {
             type: 'MESSAGE',
             content,
             senderId: myPeerId
         };
+        const payloadStr = JSON.stringify(messagePayload);
 
-        // Broadcast to all connections
-        // peerInstance.connections is an object: { [peerId]: Connection[] }
-        Object.values(peerInstance.connections).forEach((conns: any) => {
-            if (Array.isArray(conns)) {
-                conns.forEach((conn) => {
-                    if (conn.open) {
-                        conn.send(messagePayload);
-                    }
-                });
+        // Send to all open data channels
+        dataChannelsRef.current.forEach((dc) => {
+            if (dc.readyState === 'open') {
+                dc.send(payloadStr);
             }
         });
 
-        // Add to own state
+        // Add to own state only once
         dispatch(addMessage({
             id: crypto.randomUUID(),
             senderId: myPeerId || 'ME',
@@ -129,7 +210,6 @@ export const usePeer = () => {
     };
 
     return {
-        peer: peerInstance,
         myPeerId,
         connectToHost,
         sendMessage
