@@ -45,7 +45,21 @@ export const usePeer = () => {
         // Only initialize if we haven't already
         if (peerRef.current) return;
 
-        const peer = new Peer();
+        const peer = new Peer({
+            host: 'signaling-server-6127.azurewebsites.net',
+            port: 443,
+            secure: true,
+            config: {
+                iceServers: [
+                    {
+                        urls: [
+                            'stun:stun1.l.google.com:19302',
+                            'stun:stun2.l.google.com:19302',
+                        ],
+                    },
+                ],
+            },
+        });
         peerRef.current = peer;
         setPeerInstance(peer);
 
