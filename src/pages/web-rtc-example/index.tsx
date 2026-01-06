@@ -205,11 +205,11 @@ const Video = ({ stream, muted = true }: { stream: MediaStream, muted?: boolean 
                 title={isMuted ? "Unmute" : "Mute"}
             >
                 {isMuted ? (
-                    <svg title="Muted" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-red-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-red-400">
                         <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 001.5 12c0 2.485.637 4.819 1.751 6.84.254.44.757.705 1.259.664h1.94c.583 0 1.137.234 1.549.646l4.5 4.5c.944.945 2.56.276 2.56-1.06V4.06zM17.78 9.22a.75.75 0 10-1.06 1.06L18.44 12l-1.72 1.72a.75.75 0 101.06 1.06l1.72-1.72 1.72 1.72a.75.75 0 101.06-1.06L20.56 12l1.72-1.72a.75.75 0 10-1.06-1.06l-1.72 1.72-1.72-1.72z" />
                     </svg>
                 ) : (
-                    <svg title="Unmuted" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-green-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-green-400">
                         <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 001.5 12c0 2.485.637 4.819 1.751 6.84.254.44.757.705 1.259.664h1.94c.583 0 1.137.234 1.549.646l4.5 4.5c.944.945 2.56.276 2.56-1.06V4.06zM18.59 16.91a.75.75 0 101.06 1.06 7.485 7.485 0 000-11.94.75.75 0 00-1.06 1.06 5.985 5.985 0 010 9.82zM16.47 14.79a.75.75 0 101.06 1.06 4.485 4.485 0 000-7.7.75.75 0 00-1.06 1.06 2.985 2.985 0 010 5.58z" />
                     </svg>
                 )}
