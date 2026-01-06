@@ -1,8 +1,8 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import * as signalR from '@microsoft/signalr';
 import { RootState } from '../store';
-import { setMyPeerId, addConnection, removeConnection, setError, setConnectionStatus, addMessage } from '../store/peerSlice';
+import { setMyPeerId, addConnection, updateConnectionType, removeConnection, setError, setConnectionStatus, addMessage } from '../store/peerSlice';
 
 const SIGNALING_URL = 'https://signaling-server-2032.azurewebsites.net/signal';
 
@@ -26,6 +26,29 @@ export const usePeer = () => {
     // Store DataChannels: peerId -> RTCDataChannel
     const dataChannelsRef = useRef<Map<string, RTCDataChannel>>(new Map());
 
+    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+    const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+    const localStreamRef = useRef<MediaStream | null>(null);
+
+    // Update ref when state changes
+    useEffect(() => {
+        localStreamRef.current = localStream;
+    }, [localStream]);
+
+    // Start local video with low quality (360p)
+    const startVideo = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 640 }, height: { ideal: 360 } },
+                audio: true
+            });
+            setLocalStream(stream);
+        } catch (err) {
+            console.error("Error accessing media", err);
+            dispatch(setError("Failed to access camera/microphone"));
+        }
+    };
+
     // Helper to create or get RTCPeerConnection
     const getOrCreateConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
         if (peerConnectionsRef.current.has(remotePeerId)) {
@@ -35,6 +58,22 @@ export const usePeer = () => {
         console.log(`Creating RTCPeerConnection for ${remotePeerId}`);
         const pc = new RTCPeerConnection(RTC_CONFIG);
         peerConnectionsRef.current.set(remotePeerId, pc);
+
+        // Add local tracks if available
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => {
+                pc.addTrack(track, localStreamRef.current!);
+            });
+        }
+
+        pc.ontrack = (event) => {
+            console.log('Received remote track', event.streams[0]);
+            const stream = event.streams[0];
+            setRemoteStreams(prev => ({
+                ...prev,
+                [remotePeerId]: stream
+            }));
+        };
 
         pc.onicecandidate = (event) => {
             if (event.candidate && hubConnectionRef.current) {
@@ -49,10 +88,37 @@ export const usePeer = () => {
             if (pc.connectionState === 'connected') {
                 dispatch(addConnection(remotePeerId));
                 dispatch(setConnectionStatus('CONNECTED'));
+
+                // Log the selected candidate pair to verify STUN vs TURN
+                pc.getStats().then(stats => {
+                    stats.forEach(report => {
+                        if (report.type === 'transport' && report.selectedCandidatePairId) {
+                            const candidatePair = stats.get(report.selectedCandidatePairId);
+                            const localCandidate = stats.get(candidatePair.localCandidateId);
+                            const remoteCandidate = stats.get(candidatePair.remoteCandidateId);
+
+                            let type = 'Local';
+                            if (localCandidate.candidateType === 'relay' || remoteCandidate.candidateType === 'relay') {
+                                type = 'TURN';
+                            } else if (localCandidate.candidateType === 'srflx' || remoteCandidate.candidateType === 'srflx') {
+                                type = 'STUN';
+                            }
+
+                            console.log(`%c[WebRTC] Connected via: ${type} (${localCandidate.candidateType} <-> ${remoteCandidate.candidateType})`, 'color: green; font-weight: bold;');
+                            dispatch(updateConnectionType({ id: remotePeerId, type }));
+                        }
+                    });
+                });
+
             } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
                 dispatch(removeConnection(remotePeerId));
                 peerConnectionsRef.current.delete(remotePeerId);
                 dataChannelsRef.current.delete(remotePeerId);
+                setRemoteStreams(prev => {
+                    const newState = { ...prev };
+                    delete newState[remotePeerId];
+                    return newState;
+                });
             } else if (pc.connectionState === 'failed') {
                 dispatch(setConnectionStatus('ERROR'));
                 dispatch(setError(`Connection failed with ${remotePeerId}`));
@@ -71,7 +137,7 @@ export const usePeer = () => {
         }
 
         return pc;
-    }, [dispatch]);
+    }, [dispatch]); // Removed localStream dependency
 
     const setupDataChannel = (remotePeerId: string, dc: RTCDataChannel) => {
         dc.onopen = () => {
@@ -102,6 +168,29 @@ export const usePeer = () => {
             dataChannelsRef.current.delete(remotePeerId);
         };
     };
+
+    // Handle Local Stream changes (Renegotiation)
+    useEffect(() => {
+        if (!localStream) return;
+
+        peerConnectionsRef.current.forEach(async (pc, peerId) => {
+            // Add tracks to existing connection
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+
+            // Renegotiate
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                if (hubConnectionRef.current) {
+                    await hubConnectionRef.current.invoke('SendOffer', peerId, JSON.stringify(offer));
+                }
+            } catch (err: any) {
+                console.error('Error renegotiating:', err);
+            }
+        });
+    }, [localStream]);
 
     // Initialize SignalR
     useEffect(() => {
@@ -227,6 +316,9 @@ export const usePeer = () => {
     return {
         myPeerId,
         connectToHost,
-        sendMessage
+        sendMessage,
+        startVideo,
+        localStream,
+        remoteStreams
     };
 };

@@ -1,20 +1,20 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 export interface PeerState {
-  myPeerId: string | null;
-  role: 'HOST' | 'CLIENT' | null;
-  connections: string[]; // List of connected peer IDs
-  connectionStatus: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
-  error: string | null;
-  messages: Message[];
+    myPeerId: string | null;
+    role: 'HOST' | 'CLIENT' | null;
+    connections: { id: string; type?: string }[]; // List of connected peer IDs with metadata
+    connectionStatus: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
+    error: string | null;
+    messages: Message[];
 }
 
 export interface Message {
-  id: string;
-  senderId: string;
-  role: 'ME' | 'OTHER';
-  content: string;
-  timestamp: number;
+    id: string;
+    senderId: string;
+    role: 'ME' | 'OTHER';
+    content: string;
+    timestamp: number;
 }
 
 const initialState: PeerState = {
@@ -37,12 +37,18 @@ const peerSlice = createSlice({
             state.role = action.payload;
         },
         addConnection(state, action: PayloadAction<string>) {
-            if (!state.connections.includes(action.payload)) {
-                state.connections.push(action.payload);
+            if (!state.connections.find(c => c.id === action.payload)) {
+                state.connections.push({ id: action.payload, type: 'Connecting...' });
+            }
+        },
+        updateConnectionType(state, action: PayloadAction<{ id: string, type: string }>) {
+            const conn = state.connections.find(c => c.id === action.payload.id);
+            if (conn) {
+                conn.type = action.payload.type;
             }
         },
         removeConnection(state, action: PayloadAction<string>) {
-            state.connections = state.connections.filter(id => id !== action.payload);
+            state.connections = state.connections.filter(c => c.id !== action.payload);
         },
         setConnectionStatus(state, action: PayloadAction<'IDLE' | 'CONNECTING' | 'CONNECTED' | 'ERROR'>) {
             state.connectionStatus = action.payload;
@@ -59,5 +65,5 @@ const peerSlice = createSlice({
     },
 });
 
-export const { setMyPeerId, setRole, addConnection, removeConnection, setConnectionStatus, setError, addMessage, resetPeerState } = peerSlice.actions;
+export const { setMyPeerId, setRole, addConnection, updateConnectionType, removeConnection, setConnectionStatus, setError, addMessage, resetPeerState } = peerSlice.actions;
 export default peerSlice.reducer;
