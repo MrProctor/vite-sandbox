@@ -108,17 +108,27 @@ export const usePeer = () => {
         if (hubConnectionRef.current) return;
 
         const connection = new signalR.HubConnectionBuilder()
-            .withUrl(SIGNALING_URL)
+            .withUrl(SIGNALING_URL, {
+                skipNegotiation: true,
+                transport: signalR.HttpTransportType.WebSockets
+            })
+            .configureLogging(signalR.LogLevel.Debug)
             .withAutomaticReconnect()
             .build();
 
         connection.start()
-            .then(() => {
+            .then(async () => {
                 console.log('SignalR Connected');
-                console.log('My Connection ID:', connection.connectionId);
-                if (connection.connectionId) {
-                    dispatch(setMyPeerId(connection.connectionId));
+
+                // Manually get connection ID since we skipped negotiation
+                try {
+                    const id = await connection.invoke<string>('GetConnectionId');
+                    console.log('My Connection ID:', id);
+                    dispatch(setMyPeerId(id));
                     dispatch(setError(null));
+                } catch (e: any) {
+                    console.error('Failed to get connection ID:', e);
+                    dispatch(setError(`Failed to get ID: ${e.message}`));
                 }
             })
             .catch(err => {
@@ -165,6 +175,11 @@ export const usePeer = () => {
 
     const connectToHost = async (hostId: string) => {
         if (!hubConnectionRef.current || !hostId) return;
+
+        if (hubConnectionRef.current.state !== signalR.HubConnectionState.Connected) {
+            alert('Connection not ready yet. Please wait a moment.');
+            return;
+        }
 
         dispatch(setConnectionStatus('CONNECTING'));
         console.log('Connecting to host:', hostId);
