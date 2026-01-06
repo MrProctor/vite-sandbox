@@ -10,6 +10,11 @@ const RTC_CONFIG: RTCConfiguration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        {
+            urls: 'turn:45.136.124.77:3478',
+            username: 'signaling',
+            credential: 'turn_password_2032'
+        }
     ],
 };
 
@@ -241,7 +246,7 @@ export const usePeer = () => {
 
         // Handle incoming Answer
         connection.on('ReceiveAnswer', async (senderId: string, answerJson: string) => {
-            console.log('Received Answer from:', senderId);
+            console.log('Received Answer from:', senderId, answerJson);
             const answer = JSON.parse(answerJson);
             const pc = getOrCreateConnection(senderId, true); // We must have been the initiator
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
@@ -249,7 +254,7 @@ export const usePeer = () => {
 
         // Handle incoming ICE
         connection.on('ReceiveIce', async (senderId: string, candidateJson: string) => {
-            console.log('Received ICE from:', senderId);
+            console.log('Received ICE from:', senderId, candidateJson);
             const candidate = JSON.parse(candidateJson);
             const pc = getOrCreateConnection(senderId, false); // Doesn't matter if initiator or not here
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
