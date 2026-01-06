@@ -7,6 +7,7 @@ export interface PeerState {
     connectionStatus: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
     error: string | null;
     messages: Message[];
+    peerVideoStatus: Record<string, boolean>; // true = ON, false = OFF
 }
 
 export interface Message {
@@ -24,6 +25,7 @@ const initialState: PeerState = {
     connectionStatus: 'IDLE',
     error: null,
     messages: [],
+    peerVideoStatus: {}
 };
 
 const peerSlice = createSlice({
@@ -59,11 +61,14 @@ const peerSlice = createSlice({
         addMessage(state, action: PayloadAction<Message>) {
             state.messages.push(action.payload);
         },
+        setPeerVideoStatus(state, action: PayloadAction<{ id: string, enabled: boolean }>) {
+            state.peerVideoStatus[action.payload.id] = action.payload.enabled;
+        },
         resetPeerState() {
             return initialState;
         }
     },
 });
 
-export const { setMyPeerId, setRole, addConnection, updateConnectionType, removeConnection, setConnectionStatus, setError, addMessage, resetPeerState } = peerSlice.actions;
+export const { setMyPeerId, setRole, addConnection, updateConnectionType, removeConnection, setConnectionStatus, setError, addMessage, setPeerVideoStatus, resetPeerState } = peerSlice.actions;
 export default peerSlice.reducer;

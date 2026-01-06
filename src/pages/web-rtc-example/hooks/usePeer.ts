@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import * as signalR from '@microsoft/signalr';
 import { RootState } from '../store';
-import { setMyPeerId, addConnection, updateConnectionType, removeConnection, setError, setConnectionStatus, addMessage } from '../store/peerSlice';
+import { setMyPeerId, addConnection, updateConnectionType, removeConnection, setError, setConnectionStatus, addMessage, setPeerVideoStatus } from '../store/peerSlice';
 
 const SIGNALING_URL = 'https://signaling-server-2032.azurewebsites.net/signal';
 
@@ -12,6 +12,11 @@ const RTC_CONFIG: RTCConfiguration = {
         { urls: 'stun:stun1.l.google.com:19302' },
         {
             urls: 'turn:45.136.124.77:3478',
+            username: 'signaling',
+            credential: 'turn_password_2032'
+        },
+        {
+            urls: 'turn:45.136.124.77:3478?transport=tcp',
             username: 'signaling',
             credential: 'turn_password_2032'
         }
@@ -53,6 +58,38 @@ export const usePeer = () => {
             dispatch(setError("Failed to access camera/microphone"));
         }
     };
+
+    const setupDataChannel = useCallback((remotePeerId: string, dc: RTCDataChannel) => {
+        dc.onopen = () => {
+            console.log(`DataChannel open with ${remotePeerId}`);
+            dataChannelsRef.current.set(remotePeerId, dc);
+        };
+
+        dc.onmessage = (event) => {
+            console.log('Received message:', event.data);
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'MESSAGE') {
+                    dispatch(addMessage({
+                        id: crypto.randomUUID(),
+                        senderId: remotePeerId,
+                        role: 'OTHER',
+                        content: data.content,
+                        timestamp: Date.now()
+                    }));
+                } else if (data.type === 'CAMERA_STATUS') {
+                    dispatch(setPeerVideoStatus({ id: remotePeerId, enabled: data.enabled }));
+                }
+            } catch (e) {
+                console.error('Failed to parse message:', e);
+            }
+        };
+
+        dc.onclose = () => {
+            console.log(`Data Channel closed with ${remotePeerId}`);
+            dataChannelsRef.current.delete(remotePeerId);
+        };
+    }, [dispatch]);
 
     // Helper to create or get RTCPeerConnection
     const getOrCreateConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
@@ -96,23 +133,25 @@ export const usePeer = () => {
 
                 // Log the selected candidate pair to verify STUN vs TURN
                 pc.getStats().then(stats => {
+                    let activeCandidatePair: any;
                     stats.forEach(report => {
                         if (report.type === 'transport' && report.selectedCandidatePairId) {
-                            const candidatePair = stats.get(report.selectedCandidatePairId);
-                            const localCandidate = stats.get(candidatePair.localCandidateId);
-                            const remoteCandidate = stats.get(candidatePair.remoteCandidateId);
-
-                            let type = 'Local';
-                            if (localCandidate.candidateType === 'relay' || remoteCandidate.candidateType === 'relay') {
-                                type = 'TURN';
-                            } else if (localCandidate.candidateType === 'srflx' || remoteCandidate.candidateType === 'srflx') {
-                                type = 'STUN';
-                            }
-
-                            console.log(`%c[WebRTC] Connected via: ${type} (${localCandidate.candidateType} <-> ${remoteCandidate.candidateType})`, 'color: green; font-weight: bold;');
-                            dispatch(updateConnectionType({ id: remotePeerId, type }));
+                            activeCandidatePair = stats.get(report.selectedCandidatePairId);
                         }
                     });
+
+                    if (activeCandidatePair) {
+                        const localCandidate = stats.get(activeCandidatePair.localCandidateId);
+                        const protocol = localCandidate?.protocol?.toUpperCase() || '';
+                        console.log(`[WebRTC] Connected via: ${localCandidate?.candidateType} ${protocol}`);
+
+                        let type = 'UNKNOWN';
+                        if (localCandidate?.candidateType === 'host') type = 'LAN';
+                        else if (localCandidate?.candidateType === 'srflx') type = 'STUN';
+                        else if (localCandidate?.candidateType === 'relay') type = `TURN-${protocol}`;
+
+                        dispatch(updateConnectionType({ id: remotePeerId, type }));
+                    }
                 });
 
             } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
@@ -142,37 +181,7 @@ export const usePeer = () => {
         }
 
         return pc;
-    }, [dispatch]); // Removed localStream dependency
-
-    const setupDataChannel = (remotePeerId: string, dc: RTCDataChannel) => {
-        dc.onopen = () => {
-            console.log(`DataChannel open with ${remotePeerId}`);
-            dataChannelsRef.current.set(remotePeerId, dc);
-        };
-
-        dc.onmessage = (event) => {
-            console.log('Received message:', event.data);
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === 'MESSAGE') {
-                    dispatch(addMessage({
-                        id: crypto.randomUUID(),
-                        senderId: remotePeerId,
-                        role: 'OTHER',
-                        content: data.content,
-                        timestamp: Date.now()
-                    }));
-                }
-            } catch (e) {
-                console.error('Failed to parse message:', e);
-            }
-        };
-
-        dc.onclose = () => {
-            console.log(`DataChannel closed with ${remotePeerId}`);
-            dataChannelsRef.current.delete(remotePeerId);
-        };
-    };
+    }, [dispatch, setupDataChannel]);
 
     // Handle Local Stream changes (Renegotiation)
     useEffect(() => {
@@ -318,11 +327,47 @@ export const usePeer = () => {
         }));
     };
 
+    // Broadcast status helper
+    const broadcastStatus = (type: string, payload: any) => {
+        dataChannelsRef.current.forEach((dc) => {
+            if (dc.readyState === 'open') {
+                const msg = JSON.stringify({ type, ...payload });
+                dc.send(msg);
+            }
+        });
+    };
+
+    const toggleVideo = () => {
+        if (localStream) {
+            let enabled = false;
+            localStream.getVideoTracks().forEach(track => {
+                track.enabled = !track.enabled;
+                enabled = track.enabled;
+            });
+            broadcastStatus('CAMERA_STATUS', { enabled });
+            // Return true if any video track is enabled
+            return localStream.getVideoTracks().some(track => track.enabled);
+        }
+        return false;
+    };
+
+    const toggleAudio = () => {
+        if (localStream) {
+            localStream.getAudioTracks().forEach(track => {
+                track.enabled = !track.enabled;
+            });
+            return localStream.getAudioTracks().some(track => track.enabled);
+        }
+        return false;
+    };
+
     return {
         myPeerId,
         connectToHost,
         sendMessage,
         startVideo,
+        toggleVideo,
+        toggleAudio,
         localStream,
         remoteStreams
     };
